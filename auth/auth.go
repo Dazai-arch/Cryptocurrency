@@ -28,12 +28,12 @@ func generateOTP() string {
 	return fmt.Sprintf("%06d", rand.Intn(1000000))
 }
 
-func hashPassword(password string) string {
+func hashPassword(password string) (string, error) {
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
-	return string(hashed)
+	return string(hashed), nil
 }
 
 func checkPassword(hashedPassword, password string) bool {
@@ -41,41 +41,55 @@ func checkPassword(hashedPassword, password string) bool {
 	return err == nil
 }
 
-func Signup(userEmail, password string, reader *bufio.Reader) {
-	database := db.ConnectDatabase()
+func Signup(userEmail, password string, reader *bufio.Reader) bool {
+	database, err := db.ConnectDatabase()
+	if err != nil {
+		fmt.Println("Database connection failed:", err)
+		return false
+	}
+
 	collection := database.Collection("users")
 
 	var existingUser User
-	err := collection.FindOne(
+	err = collection.FindOne(
 		context.TODO(),
 		bson.M{"email": userEmail},
 	).Decode(&existingUser)
 
 	if err == nil {
 		fmt.Println("Account already exists with this email.")
-		return
+		return false
 	}
 
 	if err != mongo.ErrNoDocuments {
 		fmt.Println("Database error:", err)
-		return
+		return false
 	}
 
 	otp := generateOTP()
 	email.SendOTP(userEmail, otp)
 
 	fmt.Print("Enter OTP: ")
-	inputOTP, _ := reader.ReadString('\n')
+	inputOTP, err := reader.ReadString('\n')
 	inputOTP = strings.TrimSpace(inputOTP)
-
+	if err != nil {
+		fmt.Println("Input error:", err)
+		return false
+	}
 	if inputOTP != otp {
 		fmt.Println("Invalid OTP. Signup failed.")
-		return
+		return false
+	}
+
+	hashedPassword, err := hashPassword(password)
+	if err != nil {
+		fmt.Println("Password hashing failed:", err)
+		return false
 	}
 
 	user := User{
 		Email:    userEmail,
-		Password: hashPassword(password),
+		Password: hashedPassword,
 		Verified: true,
 		OTP:      "",
 	}
@@ -83,14 +97,19 @@ func Signup(userEmail, password string, reader *bufio.Reader) {
 	_, err = collection.InsertOne(context.TODO(), user)
 	if err != nil {
 		fmt.Println("Signup failed:", err)
-		return
+		return false
 	}
 
 	fmt.Println("Signup successful!")
+	return true
 }
 
 func Login(email, password string) bool {
-	database := db.ConnectDatabase()
+	database, err := db.ConnectDatabase()
+	if err != nil {
+		fmt.Println("Database connection failed:", err)
+		return false
+	}
 	var u User
 
 	database.Collection("users").FindOne(
