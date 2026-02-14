@@ -123,20 +123,12 @@ export JWT_SECRET=your-secret-key
 ### Main Menu Options
 
 ```
-=== Crypto Portfolio Tracker ===
-1. View Portfolio
-2. Add Coin
-3. Update Holdings
-4. Remove Coin
-5. Refresh Prices
-6. View Profit/Loss
-7. Export Portfolio
-8. Settings
-9. Logout
-0. Exit
+
+=== Currently in development ===
+
 ```
 
-### Example Workflow
+<!-- ### Example Workflow
 
 **1. Register/Login**
 ```bash
@@ -403,4 +395,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Disclaimer**: This software is for educational purposes. Cryptocurrency investments carry risk. Always do your own research before making investment decisions.
+**Disclaimer**: This software is for educational purposes. Cryptocurrency investments carry risk. Always do your own research before making investment decisions. -->
