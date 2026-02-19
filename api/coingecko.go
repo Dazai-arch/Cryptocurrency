@@ -1,7 +1,9 @@
 package api
 
 import (
+	customerrors "crypto-portfolio-tracker/errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +15,10 @@ import (
 )
 
 type CoinGecko struct {
-	BaseURL string
-	Client  *http.Client
+	BaseURL         string
+	Client          *http.Client
+	lastRequestTime time.Time
+	minDelay        time.Duration
 }
 
 func NewCoinGecko() (*CoinGecko, error) {
@@ -34,65 +38,48 @@ func NewCoinGecko() (*CoinGecko, error) {
 	}, nil
 }
 
-func (cg *CoinGecko) FetchPrice(coinID string) (float64, error) {
-	url := fmt.Sprintf("%s/simple/price?ids=%s&vs_currencies=usd", cg.BaseURL, coinID)
-
-	resp, err := cg.Client.Get(url)
-
-	if err != nil {
-		return 0, fmt.Errorf("failed to fetch price for %s: %w", coinID, err)
+func (cg *CoinGecko) waitForRateLimit() {
+	if !cg.lastRequestTime.IsZero() {
+		elapsed := time.Since(cg.lastRequestTime)
+		if elapsed < cg.minDelay {
+			time.Sleep(cg.minDelay - elapsed)
+		}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("API returned status %d for coin %s", resp.StatusCode, coinID)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var result map[string]map[string]float64
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, fmt.Errorf("failed to parse JSON response: %w", err)
-	}
-
-	price, ok := result[coinID]["usd"]
-	if !ok {
-		return 0, fmt.Errorf("price not found for coin: %s", coinID)
-	}
-
-	return price, nil
+	cg.lastRequestTime = time.Now()
 }
 
 func (cg *CoinGecko) FetchMultiplePrices(coinIDs ...string) (map[string]float64, error) {
 	if len(coinIDs) == 0 {
-		return nil, fmt.Errorf("no coin IDs provided")
+		return nil, customerrors.NewValidationError("coinIDs", coinIDs, customerrors.ErrEmptyHoldings)
 	}
+
+	cg.waitForRateLimit()
 
 	coinList := strings.Join(coinIDs, ",")
 	url := fmt.Sprintf("%s/simple/price?ids=%s&vs_currencies=usd", cg.BaseURL, coinList)
 
 	resp, err := cg.Client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch prices: %w", err)
+		return nil, customerrors.NewAPIError("simple/price", 0, err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 429 {
+		return nil, customerrors.NewAPIError("simple/price", 429, customerrors.ErrRateLimitExceeded)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return nil, customerrors.NewAPIError("simple/price", resp.StatusCode, errors.New("failed to fetch prices"))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, customerrors.NewAPIError("simple/price", 0, fmt.Errorf("failed to read response: %w", err))
 	}
 
 	var result map[string]map[string]float64
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+		return nil, customerrors.NewAPIError("simple/price", 0, fmt.Errorf("failed to parse JSON: %w", err))
 	}
 
 	prices := make(map[string]float64)
@@ -103,6 +90,43 @@ func (cg *CoinGecko) FetchMultiplePrices(coinIDs ...string) (map[string]float64,
 	}
 
 	return prices, nil
+}
+
+func (cg *CoinGecko) FetchPrice(coinID string) (float64, error) {
+	cg.waitForRateLimit()
+
+	url := fmt.Sprintf("%s/simple/price?ids=%s&vs_currencies=usd", cg.BaseURL, coinID)
+
+	resp, err := cg.Client.Get(url)
+	if err != nil {
+		return 0, customerrors.NewAPIError("simple/price", 0, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		return 0, customerrors.NewAPIError("simple/price", 429, customerrors.ErrRateLimitExceeded)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, customerrors.NewAPIError("simple/price", resp.StatusCode, fmt.Errorf("coin %s not found", coinID))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, customerrors.NewAPIError("simple/price", 0, fmt.Errorf("failed to read response: %w", err))
+	}
+
+	var result map[string]map[string]float64
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, customerrors.NewAPIError("simple/price", 0, fmt.Errorf("failed to parse JSON: %w", err))
+	}
+
+	price, ok := result[coinID]["usd"]
+	if !ok {
+		return 0, customerrors.NewAPIError("simple/price", 0, customerrors.ErrPriceNotAvailable)
+	}
+
+	return price, nil
 }
 
 func (cg *CoinGecko) GetSupportedCoins() (map[string]string, error) {

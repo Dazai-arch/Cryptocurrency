@@ -11,7 +11,7 @@ type Holding struct {
 }
 
 type Portfolio struct {
-	UserEmail  string    `bson:"user_email"`
-	Holdings   []Holding `bson:"holdings"`
-	UpdatedAAt time.Time `bson:"updated_at"`
+	UserEmail string    `bson:"user_email"`
+	Holdings  []Holding `bson:"holdings"`
+	UpdatedAt time.Time `bson:"updated_at"`
 }
