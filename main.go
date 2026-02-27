@@ -46,7 +46,9 @@ func main() {
 			password, _ := reader.ReadString('\n')
 			password = strings.TrimSpace(password)
 
-			auth.Signup(email, password, reader)
+			if auth.Signup(email, password, reader) {
+				fmt.Println("You can now log in with your new account.")
+			}
 
 		case 2:
 			fmt.Print("Enter Email: ")
@@ -59,6 +61,8 @@ func main() {
 
 			if auth.Login(email, password) {
 				handlePortfolioMenu(email, cryptoAPI, reader)
+			} else {
+				fmt.Println("Login failed. Please check your email and password.")
 			}
 
 		case 3:
@@ -126,43 +130,72 @@ func addMultipleHoldings(userEmail string, reader *bufio.Reader) {
 		return
 	}
 
-	holdings := make([]models.Holding, count)
+	holdings := make([]models.Holding, 0, count)
 	for i := 0; i < count; i++ {
 		fmt.Printf("\n--- Holding %d ---\n", i+1)
 
 		fmt.Print("Coin ID: ")
 		coinID, _ := reader.ReadString('\n')
+		coinID = strings.TrimSpace(coinID)
+		if coinID == "" {
+			fmt.Printf("Holding %d skipped: coin ID cannot be empty.\n", i+1)
+			continue
+		}
 
 		fmt.Print("Coin Name: ")
 		coinName, _ := reader.ReadString('\n')
+		coinName = strings.TrimSpace(coinName)
+		if coinName == "" {
+			fmt.Printf("Holding %d skipped: coin name cannot be empty.\n", i+1)
+			continue
+		}
 
 		fmt.Print("Quantity: ")
 		quantityStr, _ := reader.ReadString('\n')
-		quantity, _ := strconv.ParseFloat(strings.TrimSpace(quantityStr), 64)
+		quantity, err := strconv.ParseFloat(strings.TrimSpace(quantityStr), 64)
+		if err != nil || quantity <= 0 {
+			fmt.Printf("Holding %d skipped: quantity must be a number greater than 0.\n", i+1)
+			continue
+		}
 
 		fmt.Print("Buy Price: ")
 		priceStr, _ := reader.ReadString('\n')
-		buyPrice, _ := strconv.ParseFloat(strings.TrimSpace(priceStr), 64)
+		buyPrice, err := strconv.ParseFloat(strings.TrimSpace(priceStr), 64)
+		if err != nil || buyPrice <= 0 {
+			fmt.Printf("Holding %d skipped: buy price must be a number greater than 0.\n", i+1)
+			continue
+		}
 
-		holdings[i] = models.Holding{
-			CoinID:   strings.TrimSpace(coinID),
-			CoinName: strings.TrimSpace(coinName),
+		holdings = append(holdings, models.Holding{
+			CoinID:   coinID,
+			CoinName: coinName,
 			Quantity: quantity,
 			BuyPrice: buyPrice,
-		}
+		})
 	}
+
+	if len(holdings) == 0 {
+		fmt.Println("No valid holdings to add.")
+		return
+	}
+
 	if err := portfolio.AddMultipleHoldings(userEmail, holdings...); err != nil {
 		fmt.Printf("Error adding holdings: %v\n", err)
 		return
 	}
 
-	fmt.Println("All holdings added successfully!")
+	fmt.Printf("%d holding(s) added successfully!\n", len(holdings))
 }
 
 func calculateTotal(userEmail string, cryptoAPI api.CryptoApi) {
 	p, err := portfolio.GetPortfolio(userEmail)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	if len(p.Holdings) == 0 {
+		fmt.Println("Your portfolio is empty. Add some holdings first!")
 		return
 	}
 
@@ -176,7 +209,7 @@ func calculateTotal(userEmail string, cryptoAPI api.CryptoApi) {
 }
 
 func calculateProfitLoss(userEmail string, cryptoAPI api.CryptoApi, reader *bufio.Reader) {
-	fmt.Println("\n⏳ Loading your portfolio...")
+	fmt.Println("\nLoading your portfolio...")
 	p, err := portfolio.GetPortfolio(userEmail)
 	if err != nil {
 		var dbErr *customerrors.DatabaseError
@@ -189,7 +222,7 @@ func calculateProfitLoss(userEmail string, cryptoAPI api.CryptoApi, reader *bufi
 	}
 
 	if len(p.Holdings) == 0 {
-		fmt.Println("📭 Your portfolio is empty. Add some holdings first!")
+		fmt.Println("Your portfolio is empty. Add some holdings first!")
 		return
 	}
 
@@ -208,9 +241,21 @@ func calculateProfitLoss(userEmail string, cryptoAPI api.CryptoApi, reader *bufi
 			coinIDs[i] = strings.TrimSpace(coinIDs[i])
 		}
 
+		filtered := coinIDs[:0]
+		for _, id := range coinIDs {
+			if id != "" {
+				filtered = append(filtered, id)
+			}
+		}
+		if len(filtered) == 0 {
+			fmt.Println("No valid coin IDs entered.")
+			return
+		}
+
 		fmt.Println("\nCalculating profit/loss...")
-		profitLoss, err = portfolio.CalculateProfitLoss(p, cryptoAPI, coinIDs...)
+		profitLoss, err = portfolio.CalculateProfitLoss(p, cryptoAPI, filtered...)
 	} else {
+		// Covers "n", "", or any other input — always calculate for all holdings
 		fmt.Println("\nCalculating profit/loss for all holdings...")
 		profitLoss, err = portfolio.CalculateProfitLoss(p, cryptoAPI)
 	}
