@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -76,13 +77,15 @@ func main() {
 
 func handlePortfolioMenu(userEmail string, cryptoAPI api.CryptoApi, reader *bufio.Reader) {
 	for {
-		fmt.Println("\n=== Portfolio Menu ===")
+		fmt.Println("\n\n=== Portfolio Menu ===")
 		fmt.Println("1. View Portfolio")
 		fmt.Println("2. Add Holdings")
 		fmt.Println("3. Add Multiple Holdings")
 		fmt.Println("4. Calculate Total Value")
 		fmt.Println("5. Calculate Profit/Loss Value")
-		fmt.Println("6. LogOut")
+		fmt.Println("6. Export Portfolio as JSON")
+		fmt.Println("7. Import Portfolio from JSON")
+		fmt.Println("8. LogOut")
 		fmt.Print("Enter The Option: ")
 
 		choice, _ := reader.ReadString('\n')
@@ -113,12 +116,81 @@ func handlePortfolioMenu(userEmail string, cryptoAPI api.CryptoApi, reader *bufi
 			calculateProfitLoss(userEmail, cryptoAPI, reader)
 
 		case 6:
+			exportPortfolioJSON(userEmail)
+
+		case 7:
+			importPortfolioJSON(reader)
+
+		case 8:
 			fmt.Println("Logging Out")
 			return
 		default:
 			fmt.Println("Invalid Choice")
 		}
 	}
+}
+
+func exportPortfolioJSON(userEmail string) {
+	p, err := portfolio.GetPortfolio(userEmail)
+	if err != nil {
+		fmt.Printf("Error fetching portfolio: %v\n", err)
+		return
+	}
+
+	if len(p.Holdings) == 0 {
+		fmt.Println("Your portfolio is empty. Add some holdings first!")
+		return
+	}
+
+	jsonBytes, err := json.Marshal(p)
+	if err != nil {
+		fmt.Printf("Error marshaling portfolio to JSON: %v\n", err)
+		return
+	}
+
+	var pretty interface{}
+	_ = json.Unmarshal(jsonBytes, &pretty)
+	prettyBytes, _ := json.MarshalIndent(pretty, "", "  ")
+
+	fmt.Println("\n======= EXPORTED PORTFOLIO JSON (Marshaled) =======")
+	fmt.Println(string(prettyBytes))
+}
+
+func importPortfolioJSON(reader *bufio.Reader) {
+	fmt.Print("\n")
+	fmt.Println(`Example:`)
+	fmt.Println(`{"user_email":"you@example.com","holdings":[{"coin_id":"bitcoin","coin_name":"Bitcoin","quantity":0.5,"buy_price":40000,"added_at":"2024-01-15T10:30:00Z"}]}`)
+	fmt.Println("\nPaste your portfolio JSON (single line) and press Enter:")
+	fmt.Print("> ")
+	raw, _ := reader.ReadString('\n')
+	raw = strings.TrimSpace(raw)
+
+	if raw == "" {
+		fmt.Println("No JSON input provided.")
+		return
+	}
+
+	var p models.Portfolio
+	err := json.Unmarshal([]byte(raw), &p)
+	if err != nil {
+		fmt.Printf("Error unmarshaling JSON to Portfolio: %v\n", err)
+		return
+	}
+
+	fmt.Println("\n======= IMPORTED PORTFOLIO (Unmarshaled) =======")
+	fmt.Printf("  User Email : %s\n", p.UserEmail)
+	fmt.Printf("  Updated At : %s \n", p.UpdatedAt.Format("02 Jan 2006, 15:04:05 UTC"))
+	fmt.Printf("  Holdings   : %d\n", len(p.Holdings))
+
+	for i, h := range p.Holdings {
+		fmt.Printf("\n  Holding[%d]:\n", i+1)
+		fmt.Printf("    Coin      : %s (%s)\n", h.CoinName, h.CoinID)
+		fmt.Printf("    Quantity  : %.4f\n", h.Quantity)
+		fmt.Printf("    Buy Price : $%.2f\n", h.BuyPrice)
+		fmt.Printf("    Added At  : %s\n",
+			h.AddedAt.Format("02 Jan 2006, 15:04:05 UTC"))
+	}
+
 }
 
 func addMultipleHoldings(userEmail string, reader *bufio.Reader) {
@@ -255,7 +327,6 @@ func calculateProfitLoss(userEmail string, cryptoAPI api.CryptoApi, reader *bufi
 		fmt.Println("\nCalculating profit/loss...")
 		profitLoss, err = portfolio.CalculateProfitLoss(p, cryptoAPI, filtered...)
 	} else {
-		// Covers "n", "", or any other input — always calculate for all holdings
 		fmt.Println("\nCalculating profit/loss for all holdings...")
 		profitLoss, err = portfolio.CalculateProfitLoss(p, cryptoAPI)
 	}
